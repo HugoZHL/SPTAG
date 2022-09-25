@@ -593,11 +593,11 @@ break;
 
                             int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples, m_fBalanceFactor, item.debug, abort);
                             if (numClusters <= 1) {
-                                SizeType end = min(item.last + 1, (SizeType)localindices.size());
+                                SizeType end = min(item.last, (SizeType)localindices.size());
                                 std::sort(localindices.begin() + item.first, localindices.begin() + end);
                                 m_pTreeRoots[item.index].centerid = (reverseIndices == nullptr) ? localindices[item.first] : reverseIndices->at(localindices[item.first]);
                                 m_pTreeRoots[item.index].childStart = -m_pTreeRoots[item.index].childStart;
-                                for (SizeType j = item.first + 1; j < end; j++) {
+                                for (SizeType j = item.first; j < end; j++) {
                                     SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
                                     m_pTreeRoots.emplace_back(cid);
                                     m_pSampleCenterMap[cid] = m_pTreeRoots[item.index].centerid;
@@ -611,7 +611,7 @@ break;
                                     if (args.counts[k] == 0) continue;
                                     SizeType cid = (reverseIndices == nullptr) ? localindices[item.first + args.counts[k] - 1] : reverseIndices->at(localindices[item.first + args.counts[k] - 1]);
                                     m_pTreeRoots.emplace_back(cid);
-                                    if (args.counts[k] > 1) ss.push(BKTStackItem((SizeType)(m_pTreeRoots.size() - 1), item.first, item.first + args.counts[k] - 1, item.debug && (args.counts[k] == maxCount)));
+                                    if (args.counts[k] > 0) ss.push(BKTStackItem((SizeType)(m_pTreeRoots.size() - 1), item.first, item.first + args.counts[k], item.debug && (args.counts[k] == maxCount)));
                                     item.first += args.counts[k];
                                 }
                             }
