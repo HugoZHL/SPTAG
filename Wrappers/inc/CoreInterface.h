@@ -32,10 +32,13 @@ public:
 
     bool BuildSPANNWithMetaData(ByteArray p_meta, SizeType p_num, bool p_withMetaIndex, bool p_normalized);
 
+    bool BuildMulti(ByteArray p_data, SizeType p_num, bool p_normalized, ByteArray accum, SizeType a_num);
+
     bool Build(ByteArray p_data, SizeType p_num, bool p_normalized);
 
     bool BuildWithMetaData(ByteArray p_data, ByteArray p_meta, SizeType p_num, bool p_withMetaIndex, bool p_normalized);
 
+    std::shared_ptr<QueryResult> PartialSearch(ByteArray p_data, int p_resultNum, ByteArray accum, SizeType a_num);
     std::shared_ptr<QueryResult> Search(ByteArray p_data, int p_resultNum);
 
     std::shared_ptr<QueryResult> SearchWithMetaData(ByteArray p_data, int p_resultNum);

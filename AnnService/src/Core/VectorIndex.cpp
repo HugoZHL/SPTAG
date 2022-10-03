@@ -403,6 +403,28 @@ VectorIndex::SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort
     return ret;
 }
 
+ErrorCode
+VectorIndex::BuildMultiIndex(std::shared_ptr<VectorSet> p_vectorSet,
+    std::shared_ptr<MetadataSet> p_metadataSet, const std::vector<int>& accum, bool p_withMetaIndex, bool p_normalized, bool p_shareOwnership)
+{
+    LOG(Helper::LogLevel::LL_Info, "Begin build index...\n");
+
+    bool valueMatches = p_vectorSet->GetValueType() == GetVectorValueType();
+    bool quantizerMatches = ((bool)m_pQuantizer) && (p_vectorSet->GetValueType() == SPTAG::VectorValueType::UInt8);
+    if (nullptr == p_vectorSet || !(valueMatches || quantizerMatches))
+    {
+        return ErrorCode::Fail;
+    }
+    m_pMetadata = std::move(p_metadataSet);
+    if (p_withMetaIndex && m_pMetadata != nullptr)
+    {
+        LOG(Helper::LogLevel::LL_Info, "Build meta mapping...\n");
+        BuildMetaMapping(false);
+    }
+    BuildMultiIndex(p_vectorSet->GetData(), p_vectorSet->Count(), accum, p_vectorSet->Dimension(), p_normalized, p_shareOwnership);
+    return ErrorCode::Success;
+}
+
 
 ErrorCode
 VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
@@ -426,6 +448,16 @@ VectorIndex::BuildIndex(std::shared_ptr<VectorSet> p_vectorSet,
     return ErrorCode::Success;
 }
 
+ErrorCode
+VectorIndex::PartialSearchIndex(const void* p_vector, int p_vectorCount, int p_neighborCount, bool p_withMeta, BasicResult* p_results, const std::vector<int>& accum) const {
+    size_t vectorSize = GetValueTypeSize(GetVectorValueType()) * GetFeatureDim();
+#pragma omp parallel for schedule(dynamic,10)
+    for (int i = 0; i < p_vectorCount; i++) {
+        QueryResult res((char*)p_vector + i * vectorSize, p_neighborCount, p_withMeta, p_results + i * p_neighborCount);
+        PartialSearchIndex(res);
+    }
+    return ErrorCode::Success;
+}
 
 ErrorCode
 VectorIndex::SearchIndex(const void* p_vector, int p_vectorCount, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const {

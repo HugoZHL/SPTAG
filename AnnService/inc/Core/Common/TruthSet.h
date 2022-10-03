@@ -308,6 +308,7 @@ namespace SPTAG
                     sampleTruth.SetTarget(reconstructVector, index->m_pQuantizer);
                 }
 
+                LOG(Helper::LogLevel::LL_Info, "!!!!!!!!!!!!!!!!!!! in calculate recall\n");
                 index->SearchIndex(sampleANN);
                 for (SizeType y = 0; y < index->GetNumSamples(); y++)
                 {

@@ -72,6 +72,21 @@ AnnIndex::BuildSPANNWithMetaData(ByteArray p_meta, SizeType p_num, bool p_withMe
     return (SPTAG::ErrorCode::Success == m_index->BuildIndex(p_normalized));
 }
 
+bool
+AnnIndex::BuildMulti(ByteArray p_data, SizeType p_num, bool p_normalized, ByteArray accum, SizeType a_num)
+{
+    if (nullptr == m_index)
+    {
+        m_index = SPTAG::VectorIndex::CreateInstance(m_algoType, m_inputValueType);
+    }
+    if (nullptr == m_index || p_num == 0 || m_dimension == 0 || p_data.Length() != p_num * m_inputVectorSize)
+    {
+        return false;
+    }
+    int* accum_data = (int*)accum.Data();
+    const std::vector<int> accum_vec(accum_data, accum_data + a_num);
+    return (SPTAG::ErrorCode::Success == m_index->BuildMultiIndex(p_data.Data(), (SPTAG::SizeType)p_num, accum_vec, (SPTAG::DimensionType)m_dimension, p_normalized));
+}
 
 bool
 AnnIndex::Build(ByteArray p_data, SizeType p_num, bool p_normalized)
@@ -165,6 +180,20 @@ void
 AnnIndex::SetQuantizerADC(bool p_adc)
 {
     if (nullptr != m_index) return m_index->SetQuantizerADC(p_adc);
+}
+
+std::shared_ptr<QueryResult>
+AnnIndex::PartialSearch(ByteArray p_data, int p_resultNum, ByteArray accum, SizeType a_num)
+{
+    std::shared_ptr<QueryResult> results = std::make_shared<QueryResult>(p_data.Data(), p_resultNum, false);
+
+    if (nullptr != m_index)
+    {
+        int* accum_data = (int*)accum.Data();
+        const std::vector<int> accum_vec(accum_data, accum_data + a_num);
+        m_index->PartialSearchIndex(*results, false, accum_vec);
+    }
+    return std::move(results);
 }
 
 

@@ -164,6 +164,11 @@ namespace SPTAG
         } \
         p_query.SortResult(); \
 
+        template<typename T>
+        ErrorCode Index<T>::PartialSearchIndex(QueryResult &p_query, bool p_searchDeleted, const std::vector<int>& accum) const
+        {
+            return ErrorCode::Fail;
+        }
 
         template <typename T>
         template <typename Q>
@@ -303,6 +308,12 @@ case VectorValueType::Name: \
             return ErrorCode::Success;
         }
 #pragma endregion
+
+        template <typename T>
+        ErrorCode Index<T>::BuildMultiIndex(const void* p_data, SizeType p_vectorNum, const std::vector<int>& accum, DimensionType p_dimension, bool p_normalized, bool p_shareOwnership)
+        {
+            return ErrorCode::Fail;
+        }
 
         template <typename T>
         ErrorCode Index<T>::BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized, bool p_shareOwnership)

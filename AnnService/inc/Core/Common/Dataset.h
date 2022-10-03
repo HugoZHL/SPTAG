@@ -23,6 +23,8 @@ namespace SPTAG
             SizeType rowsInBlock;
             SizeType rowsInBlockEx;
             std::vector<T*> incBlocks;
+            int m_iDataBlockSize = 1024 * 1024;
+            int m_iDataCapacity = MaxSize;
 
         public:
             Dataset() {}
@@ -88,6 +90,14 @@ namespace SPTAG
             const T* operator[](SizeType index) const
             {
                 return At(index);
+            }
+
+            const Dataset<T> Slice(SizeType begin, SizeType end) const
+            {
+                Dataset<T> slice_dataset;
+                slice_dataset.Initialize(end - begin, cols, m_iDataBlockSize, m_iDataCapacity, data + begin, true);
+                // slice_dataset.ownData = false;
+                return std::move(slice_dataset);
             }
 
             ErrorCode AddBatch(const T* pData, SizeType num)

@@ -152,7 +152,9 @@ namespace SPTAG
             ErrorCode LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams);
             ErrorCode LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs);
 
+            ErrorCode BuildMultiIndex(const void* p_data, SizeType p_vectorNum, const std::vector<int>& accum, DimensionType p_dimension, bool p_normalized = false, bool p_shareOwnership = false);
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false, bool p_shareOwnership = false);
+            ErrorCode PartialSearchIndex(QueryResult &p_query, bool p_searchDeleted = false, const std::vector<int>& accum = {}) const;
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
             ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
             ErrorCode SearchTree(QueryResult &p_query) const;
@@ -168,6 +170,7 @@ namespace SPTAG
             ErrorCode RefineIndex(std::shared_ptr<VectorIndex>& p_newIndex);
 
         private:
+            void PartialSearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated, const std::vector<int>& accum = {}) const;
             void SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated) const;
         };
     } // namespace BKT

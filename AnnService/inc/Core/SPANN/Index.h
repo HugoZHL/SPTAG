@@ -116,8 +116,10 @@ namespace SPTAG
             ErrorCode LoadIndexData(const std::vector<std::shared_ptr<Helper::DiskIO>>& p_indexStreams);
             ErrorCode LoadIndexDataFromMemory(const std::vector<ByteArray>& p_indexBlobs);
 
+            ErrorCode BuildMultiIndex(const void* p_data, SizeType p_vectorNum, const std::vector<int>& accum, DimensionType p_dimension, bool p_normalized = false, bool p_shareOwnership = false);
             ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false, bool p_shareOwnership = false);
             ErrorCode BuildIndex(bool p_normalized = false);
+            ErrorCode PartialSearchIndex(QueryResult &p_query, bool p_searchDeleted = false, const std::vector<int>& accum = {}) const;
             ErrorCode SearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const;
             ErrorCode SearchDiskIndex(QueryResult& p_query, SearchStats* p_stats = nullptr) const;
             ErrorCode DebugSearchDiskIndex(QueryResult& p_query, int p_subInternalResultNum, int p_internalResultNum,
@@ -145,8 +147,11 @@ namespace SPTAG
             void SelectHeadDynamically(const std::shared_ptr<COMMON::BKTree> p_tree, int p_vectorCount, std::vector<int>& p_selected);
 
             template <typename InternalDataType>
+            bool MultiSelectHeadInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader, const std::vector<int>& accum);
+            template <typename InternalDataType>
             bool SelectHeadInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader);
 
+            ErrorCode BuildMultiIndexInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader, const std::vector<int>& accum);
             ErrorCode BuildIndexInternal(std::shared_ptr<Helper::VectorSetReader>& p_reader);
         };
     } // namespace SPANN

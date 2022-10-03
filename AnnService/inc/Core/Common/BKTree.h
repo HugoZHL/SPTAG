@@ -30,6 +30,12 @@ namespace SPTAG
 
             BKTNode(SizeType cid = -1) : centerid(cid), childStart(-1), childEnd(-1) {}
         };
+        
+        struct  BKTStackItem {
+            SizeType index, first, last;
+            bool debug;
+            BKTStackItem(SizeType index_, SizeType first_, SizeType last_, bool debug_ = false) : index(index_), first(first_), last(last_), debug(debug_) {}
+        };
 
         template <typename T>
         struct KmeansArgs {
@@ -541,17 +547,40 @@ break;
             }
 
             template <typename T>
+            void BuildMultiTrees(const Dataset<T>& data, DistCalcMethod distMethod, int numOfThreads, const std::vector<int> accum,
+                std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr, 
+                bool dynamicK = false, IAbortOperation* abort = nullptr)
+            {
+                m_iTreeNumber = accum.size() - 1;
+                float ori_m_fBalanceFactor = m_fBalanceFactor;
+                m_pSampleCenterMap.clear();
+                for (size_t i = 0; i < m_iTreeNumber; i++)
+                {
+                    int begin = accum[i], end = accum[i + 1];
+                    std::vector<SizeType> localindices, localreverse;
+                    if (indices == nullptr) {
+                        localindices.resize(end - begin);
+                        for (SizeType i = 0; i < localindices.size(); i++) localindices[i] = i;
+                    }
+                    else {
+                        localindices.assign(indices->begin() + begin, indices->begin() + end);
+                    }
+                    std::vector<SizeType>* cur_reverse_ptr = reverseIndices;
+                    if (reverseIndices != nullptr) {
+                        localreverse.assign(reverseIndices->begin() + begin, reverseIndices->begin() + end);
+                        cur_reverse_ptr = &localreverse;
+                    }
+                    const Dataset<T> cur_data = data.Slice(accum[i], accum[i + 1]);
+                    _BuildTrees(ori_m_fBalanceFactor, cur_data, distMethod, numOfThreads, localindices, cur_reverse_ptr, dynamicK, abort, i);
+                }
+            }
+
+            template <typename T>
             void BuildTrees(const Dataset<T>& data, DistCalcMethod distMethod, int numOfThreads, 
                 std::vector<SizeType>* indices = nullptr, std::vector<SizeType>* reverseIndices = nullptr, 
                 bool dynamicK = false, IAbortOperation* abort = nullptr)
             {
-                struct  BKTStackItem {
-                    SizeType index, first, last;
-                    bool debug;
-                    BKTStackItem(SizeType index_, SizeType first_, SizeType last_, bool debug_ = false) : index(index_), first(first_), last(last_), debug(debug_) {}
-                };
-                std::stack<BKTStackItem> ss;
-
+                float ori_m_fBalanceFactor = m_fBalanceFactor;
                 std::vector<SizeType> localindices;
                 if (indices == nullptr) {
                     localindices.resize(data.R());
@@ -560,67 +589,75 @@ break;
                 else {
                     localindices.assign(indices->begin(), indices->end());
                 }
-                KmeansArgs<T> args(m_iBKTKmeansK, data.C(), (SizeType)localindices.size(), numOfThreads, distMethod, m_pQuantizer);
-
-                if (m_fBalanceFactor < 0) m_fBalanceFactor = DynamicFactorSelect(data, localindices, 0, (SizeType)localindices.size(), args, m_iSamples);
 
                 m_pSampleCenterMap.clear();
                 for (char i = 0; i < m_iTreeNumber; i++)
                 {
-                    std::shuffle(localindices.begin(), localindices.end(), rg);
-
-                    m_pTreeStart.push_back((SizeType)m_pTreeRoots.size());
-                    m_pTreeRoots.emplace_back((SizeType)localindices.size());
-                    LOG(Helper::LogLevel::LL_Info, "Start to build BKTree %d\n", i + 1);
-
-                    ss.push(BKTStackItem(m_pTreeStart[i], 0, (SizeType)localindices.size(), true));
-                    while (!ss.empty()) {
-                        if (abort && abort->ShouldAbort()) return;
-
-                        BKTStackItem item = ss.top(); ss.pop();
-                        m_pTreeRoots[item.index].childStart = (SizeType)m_pTreeRoots.size();
-                        if (item.last - item.first <= m_iBKTLeafSize) {
-                            for (SizeType j = item.first; j < item.last; j++) {
-                                SizeType cid = (reverseIndices == nullptr)? localindices[j]: reverseIndices->at(localindices[j]);
-                                m_pTreeRoots.emplace_back(cid);
-                            }
-                        }
-                        else { // clustering the data into BKTKmeansK clusters
-                            if (dynamicK) {
-                                args._DK = std::min<int>((item.last - item.first) / m_iBKTLeafSize + 1, m_iBKTKmeansK);
-                                args._DK = std::max<int>(args._DK, 2);
-                            }
-
-                            int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples, m_fBalanceFactor, item.debug, abort);
-                            if (numClusters <= 1) {
-                                SizeType end = min(item.last, (SizeType)localindices.size());
-                                std::sort(localindices.begin() + item.first, localindices.begin() + end);
-                                m_pTreeRoots[item.index].centerid = (reverseIndices == nullptr) ? localindices[item.first] : reverseIndices->at(localindices[item.first]);
-                                m_pTreeRoots[item.index].childStart = -m_pTreeRoots[item.index].childStart;
-                                for (SizeType j = item.first; j < end; j++) {
-                                    SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
-                                    m_pTreeRoots.emplace_back(cid);
-                                    m_pSampleCenterMap[cid] = m_pTreeRoots[item.index].centerid;
-                                }
-                                m_pSampleCenterMap[-1 - m_pTreeRoots[item.index].centerid] = item.index;
-                            }
-                            else {
-                                SizeType maxCount = 0;
-                                for (int k = 0; k < m_iBKTKmeansK; k++) if (args.counts[k] > maxCount) maxCount = args.counts[k];
-                                for (int k = 0; k < m_iBKTKmeansK; k++) {
-                                    if (args.counts[k] == 0) continue;
-                                    SizeType cid = (reverseIndices == nullptr) ? localindices[item.first + args.counts[k] - 1] : reverseIndices->at(localindices[item.first + args.counts[k] - 1]);
-                                    m_pTreeRoots.emplace_back(cid);
-                                    if (args.counts[k] > 0) ss.push(BKTStackItem((SizeType)(m_pTreeRoots.size() - 1), item.first, item.first + args.counts[k], item.debug && (args.counts[k] == maxCount)));
-                                    item.first += args.counts[k];
-                                }
-                            }
-                        }
-                        m_pTreeRoots[item.index].childEnd = (SizeType)m_pTreeRoots.size();
-                    }
-                    m_pTreeRoots.emplace_back(-1);
-                    LOG(Helper::LogLevel::LL_Info, "%d BKTree built, %zu %zu\n", i + 1, m_pTreeRoots.size() - m_pTreeStart[i], localindices.size());
+                    _BuildTrees(ori_m_fBalanceFactor, data, distMethod, numOfThreads, localindices, reverseIndices, dynamicK, abort, i);
                 }
+            }
+
+            template <typename T>
+            void _BuildTrees(float ori_m_fBalanceFactor, const Dataset<T>& data, DistCalcMethod distMethod, int numOfThreads, 
+                std::vector<SizeType>& localindices, std::vector<SizeType>* reverseIndices = nullptr, 
+                bool dynamicK = false, IAbortOperation* abort = nullptr, int i = 0)
+            {
+                KmeansArgs<T> args(m_iBKTKmeansK, data.C(), (SizeType)localindices.size(), numOfThreads, distMethod, m_pQuantizer);
+                if (ori_m_fBalanceFactor < 0) m_fBalanceFactor = DynamicFactorSelect(data, localindices, 0, (SizeType)localindices.size(), args, m_iSamples);
+                std::stack<BKTStackItem> ss;
+                std::shuffle(localindices.begin(), localindices.end(), rg);
+
+                m_pTreeStart.push_back((SizeType)m_pTreeRoots.size());
+                m_pTreeRoots.emplace_back((SizeType)localindices.size());
+                LOG(Helper::LogLevel::LL_Info, "Start to build BKTree %d\n", i + 1);
+
+                ss.push(BKTStackItem(m_pTreeStart[i], 0, (SizeType)localindices.size(), true));
+                while (!ss.empty()) {
+                    if (abort && abort->ShouldAbort()) return;
+
+                    BKTStackItem item = ss.top(); ss.pop();
+                    m_pTreeRoots[item.index].childStart = (SizeType)m_pTreeRoots.size();
+                    if (item.last - item.first <= m_iBKTLeafSize) {
+                        for (SizeType j = item.first; j < item.last; j++) {
+                            SizeType cid = (reverseIndices == nullptr)? localindices[j]: reverseIndices->at(localindices[j]);
+                            m_pTreeRoots.emplace_back(cid);
+                        }
+                    }
+                    else { // clustering the data into BKTKmeansK clusters
+                        if (dynamicK) {
+                            args._DK = std::min<int>((item.last - item.first) / m_iBKTLeafSize + 1, m_iBKTKmeansK);
+                            args._DK = std::max<int>(args._DK, 2);
+                        }
+
+                        int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples, m_fBalanceFactor, item.debug, abort);
+                        if (numClusters <= 1) {
+                            SizeType end = min(item.last, (SizeType)localindices.size());
+                            std::sort(localindices.begin() + item.first, localindices.begin() + end);
+                            m_pTreeRoots[item.index].centerid = (reverseIndices == nullptr) ? localindices[item.first] : reverseIndices->at(localindices[item.first]);
+                            m_pTreeRoots[item.index].childStart = -m_pTreeRoots[item.index].childStart;
+                            for (SizeType j = item.first; j < end; j++) {
+                                SizeType cid = (reverseIndices == nullptr) ? localindices[j] : reverseIndices->at(localindices[j]);
+                                m_pTreeRoots.emplace_back(cid);
+                                m_pSampleCenterMap[cid] = m_pTreeRoots[item.index].centerid;
+                            }
+                            m_pSampleCenterMap[-1 - m_pTreeRoots[item.index].centerid] = item.index;
+                        }
+                        else {
+                            SizeType maxCount = 0;
+                            for (int k = 0; k < m_iBKTKmeansK; k++) if (args.counts[k] > maxCount) maxCount = args.counts[k];
+                            for (int k = 0; k < m_iBKTKmeansK; k++) {
+                                if (args.counts[k] == 0) continue;
+                                SizeType cid = (reverseIndices == nullptr) ? localindices[item.first + args.counts[k] - 1] : reverseIndices->at(localindices[item.first + args.counts[k] - 1]);
+                                m_pTreeRoots.emplace_back(cid);
+                                if (args.counts[k] > 0) ss.push(BKTStackItem((SizeType)(m_pTreeRoots.size() - 1), item.first, item.first + args.counts[k], item.debug && (args.counts[k] == maxCount)));
+                                item.first += args.counts[k];
+                            }
+                        }
+                    }
+                    m_pTreeRoots[item.index].childEnd = (SizeType)m_pTreeRoots.size();
+                }
+                m_pTreeRoots.emplace_back(-1);
+                LOG(Helper::LogLevel::LL_Info, "%d BKTree built, %zu %zu\n", i + 1, m_pTreeRoots.size() - m_pTreeStart[i], localindices.size());
             }
 
             inline std::uint64_t BufferSize() const
@@ -691,66 +728,81 @@ break;
             }
 
             template <typename T>
+            void InitPartialSearchTrees(const Dataset<T>& data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, const std::vector<int>& accum) const
+            {
+                for (char i = 0; i < accum.size() - 1; ++i) {
+                    const Dataset<T> cur_data = data.Slice(accum[i], accum[i + 1]);
+                    _InitSearchTrees<T>(cur_data, fComputeDistance, p_query, p_space, i);
+                }
+            }
+
+            template <typename T>
             void InitSearchTrees(const Dataset<T>& data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space) const
             {
-                for (char i = 0; i < m_iTreeNumber; i++) {
-                    const BKTNode& node = m_pTreeRoots[m_pTreeStart[i]];
-                    if (node.childStart < 0) {
-                        p_space.m_SPTQueue.insert(NodeDistPair(m_pTreeStart[i], fComputeDistance(p_query.GetQuantizedTarget(), data[node.centerid], data.C())));
-                    } else if (m_bfs) {
-                        float FactorQ = 1.1f;
-                        int MaxBFSNodes = 100;
-                        p_space.m_currBSPTQueue.Resize(MaxBFSNodes); p_space.m_nextBSPTQueue.Resize(MaxBFSNodes);
-                        Heap<NodeDistPair>* p_curr = &p_space.m_currBSPTQueue, * p_next = &p_space.m_nextBSPTQueue;
-                        
-                        p_curr->Top().distance = 1e9;
-                        for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
-                            SizeType index = m_pTreeRoots[begin].centerid;
-                            float dist = fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C());
-                            if (dist <= FactorQ * p_curr->Top().distance && p_curr->size() < MaxBFSNodes) {
-                                p_curr->insert(NodeDistPair(begin, dist));
-                            }
-                            else {
-                                p_space.m_SPTQueue.insert(NodeDistPair(begin, dist));
-                            }
-                        }
+                for (int i = 0; i < m_iTreeNumber; ++i) {
+                    _InitSearchTrees<T>(data, fComputeDistance, p_query, p_space, i);
+                }
+            }
 
-                        for (int level = 1; level < 2; level++) {
-                            p_next->Top().distance = 1e9;
-                            while (!p_curr->empty()) {
-                                NodeDistPair tmp = p_curr->pop();
-                                const BKTNode& tnode = m_pTreeRoots[tmp.node];
-                                if (tnode.childStart < 0) {
-                                    p_space.m_SPTQueue.insert(tmp);
-                                }
-                                else {
-                                    if (!p_space.CheckAndSet(tnode.centerid)) {
-                                        p_space.m_NGQueue.insert(NodeDistPair(tnode.centerid, tmp.distance));
-                                    }
-                                    for (SizeType begin = tnode.childStart; begin < tnode.childEnd; begin++) {
-                                        SizeType index = m_pTreeRoots[begin].centerid;
-                                        float dist = fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C());
-                                        if (dist <= FactorQ * p_next->Top().distance && p_next->size() < MaxBFSNodes) {
-                                            p_next->insert(NodeDistPair(begin, dist));
-                                        }
-                                        else {
-                                            p_space.m_SPTQueue.insert(NodeDistPair(begin, dist));
-                                        }
-                                    }
-                                }
-                            }
-                            std::swap(p_curr, p_next);
+            template <typename T>
+            void _InitSearchTrees(const Dataset<T>& data, std::function<float(const T*, const T*, DimensionType)> fComputeDistance, COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, int i) const
+            {
+                const BKTNode& node = m_pTreeRoots[m_pTreeStart[i]];
+                if (node.childStart < 0) {
+                    p_space.m_SPTQueue.insert(NodeDistPair(m_pTreeStart[i], fComputeDistance(p_query.GetQuantizedTarget(), data[node.centerid], data.C())));
+                } else if (m_bfs) {
+                    float FactorQ = 1.1f;
+                    int MaxBFSNodes = 100;
+                    p_space.m_currBSPTQueue.Resize(MaxBFSNodes); p_space.m_nextBSPTQueue.Resize(MaxBFSNodes);
+                    Heap<NodeDistPair>* p_curr = &p_space.m_currBSPTQueue, * p_next = &p_space.m_nextBSPTQueue;
+                    
+                    p_curr->Top().distance = 1e9;
+                    for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
+                        SizeType index = m_pTreeRoots[begin].centerid;
+                        float dist = fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C());
+                        if (dist <= FactorQ * p_curr->Top().distance && p_curr->size() < MaxBFSNodes) {
+                            p_curr->insert(NodeDistPair(begin, dist));
                         }
-
-                        while (!p_curr->empty()) {
-                            p_space.m_SPTQueue.insert(p_curr->pop());
+                        else {
+                            p_space.m_SPTQueue.insert(NodeDistPair(begin, dist));
                         }
                     }
-                    else {
-                        for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
-                            SizeType index = m_pTreeRoots[begin].centerid;
-                            p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C())));
+
+                    for (int level = 1; level < 2; level++) {
+                        p_next->Top().distance = 1e9;
+                        while (!p_curr->empty()) {
+                            NodeDistPair tmp = p_curr->pop();
+                            const BKTNode& tnode = m_pTreeRoots[tmp.node];
+                            if (tnode.childStart < 0) {
+                                p_space.m_SPTQueue.insert(tmp);
+                            }
+                            else {
+                                if (!p_space.CheckAndSet(tnode.centerid)) {
+                                    p_space.m_NGQueue.insert(NodeDistPair(tnode.centerid, tmp.distance));
+                                }
+                                for (SizeType begin = tnode.childStart; begin < tnode.childEnd; begin++) {
+                                    SizeType index = m_pTreeRoots[begin].centerid;
+                                    float dist = fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C());
+                                    if (dist <= FactorQ * p_next->Top().distance && p_next->size() < MaxBFSNodes) {
+                                        p_next->insert(NodeDistPair(begin, dist));
+                                    }
+                                    else {
+                                        p_space.m_SPTQueue.insert(NodeDistPair(begin, dist));
+                                    }
+                                }
+                            }
                         }
+                        std::swap(p_curr, p_next);
+                    }
+
+                    while (!p_curr->empty()) {
+                        p_space.m_SPTQueue.insert(p_curr->pop());
+                    }
+                }
+                else {
+                    for (SizeType begin = node.childStart; begin < node.childEnd; begin++) {
+                        SizeType index = m_pTreeRoots[begin].centerid;
+                        p_space.m_SPTQueue.insert(NodeDistPair(begin, fComputeDistance(p_query.GetQuantizedTarget(), data[index], data.C())));
                     }
                 }
             }

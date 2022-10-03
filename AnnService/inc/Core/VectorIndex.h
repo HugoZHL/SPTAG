@@ -28,12 +28,14 @@ public:
 
     virtual ~VectorIndex();
 
+    virtual ErrorCode BuildMultiIndex(const void* p_data, SizeType p_vectorNum, const std::vector<int>& accum, DimensionType p_dimension, bool p_normalized = false, bool p_shareOwnership = false) = 0;
     virtual ErrorCode BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized = false, bool p_shareOwnership = false) = 0;
     
     virtual ErrorCode AddIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false) = 0;
 
     virtual ErrorCode DeleteIndex(const void* p_vectors, SizeType p_vectorNum) = 0;
 
+    virtual ErrorCode PartialSearchIndex(QueryResult& p_results, bool p_searchDeleted = false, const std::vector<int>& accum = {}) const = 0;
     virtual ErrorCode SearchIndex(QueryResult& p_results, bool p_searchDeleted = false) const = 0;
     
     virtual ErrorCode RefineSearchIndex(QueryResult &p_query, bool p_searchDeleted = false) const = 0;
@@ -71,6 +73,7 @@ public:
 
     virtual ErrorCode SaveIndexToFile(const std::string& p_file, IAbortOperation* p_abort = nullptr);
 
+    virtual ErrorCode BuildMultiIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, const std::vector<int>& accum, bool p_withMetaIndex = false, bool p_normalized = false, bool p_shareOwnership = false);
     virtual ErrorCode BuildIndex(std::shared_ptr<VectorSet> p_vectorSet, std::shared_ptr<MetadataSet> p_metadataSet, bool p_withMetaIndex = false, bool p_normalized = false, bool p_shareOwnership = false);
     
     virtual ErrorCode BuildIndex(bool p_normalized = false) { return ErrorCode::Undefined; }
@@ -83,6 +86,7 @@ public:
     
     virtual const void* GetSample(ByteArray p_meta, bool& deleteFlag);
 
+    virtual ErrorCode PartialSearchIndex(const void* p_vector, int p_vectorCount, int p_neighborCount, bool p_withMeta, BasicResult* p_results, const std::vector<int>& accum = {}) const;
     virtual ErrorCode SearchIndex(const void* p_vector, int p_vectorCount, int p_neighborCount, bool p_withMeta, BasicResult* p_results) const;
 
     virtual void ApproximateRNG(std::shared_ptr<VectorSet>& fullVectors, std::unordered_set<SizeType>& exceptIDS, int candidateNum, Edge* selections, int replicaCount, int numThreads, int numTrees, int leafSize, float RNGFactor, int numGPUs);

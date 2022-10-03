@@ -182,6 +182,63 @@ namespace SPTAG
         p_query.SortResult(); \
 */
 
+#define PartialSearch(CheckDeleted, CheckDuplicated) \
+        std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
+        m_pTrees.InitPartialSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, accum); \
+        m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfInitialDynamicPivots); \
+        const DimensionType checkPos = m_pGraph.m_iNeighborhoodSize - 1; \
+        while (!p_space.m_NGQueue.empty()) { \
+            NodeDistPair gnode = p_space.m_NGQueue.pop(); \
+            SizeType tmpNode = gnode.node; \
+            const SizeType *node = m_pGraph[tmpNode]; \
+            _mm_prefetch((const char *)node, _MM_HINT_T0); \
+            for (DimensionType i = 0; i <= checkPos; i++) { \
+                _mm_prefetch((const char *)(m_pSamples)[node[i]], _MM_HINT_T0); \
+            } \
+            if (gnode.distance <= p_query.worstDist()) { \
+                SizeType checkNode = node[checkPos]; \
+                if (checkNode < -1) { \
+                    const COMMON::BKTNode& tnode = m_pTrees[-2 - checkNode]; \
+                    SizeType i = -tnode.childStart; \
+                    do { \
+                        CheckDeleted \
+                        { \
+                            CheckDuplicated \
+                            break; \
+                        } \
+                        tmpNode = m_pTrees[i].centerid; \
+                    } while (i++ < tnode.childEnd); \
+               } else { \
+                   CheckDeleted \
+                   { \
+                       p_query.AddPoint(tmpNode, gnode.distance); \
+                   } \
+               } \
+            } else { \
+                CheckDeleted \
+                { \
+                    if (gnode.distance > p_space.m_Results.worst() || p_space.m_iNumberOfCheckedLeaves > p_space.m_iMaxCheck) { \
+                        p_query.SortResult(); return; \
+                    } \
+                } \
+            } \
+            for (DimensionType i = 0; i <= checkPos; i++) { \
+                SizeType nn_index = node[i]; \
+                if (nn_index < 0) break; \
+                if (p_space.CheckAndSet(nn_index)) continue; \
+                float distance2leaf = m_fComputeDistance(p_query.GetQuantizedTarget(), (m_pSamples)[nn_index], GetFeatureDim()); \
+                p_space.m_iNumberOfCheckedLeaves++; \
+                if (p_space.m_Results.insert(distance2leaf)) { \
+                    p_space.m_NGQueue.insert(NodeDistPair(nn_index, distance2leaf)); \
+                } \
+            } \
+            if (p_space.m_NGQueue.Top().distance > p_space.m_SPTQueue.Top().distance) { \
+                m_pTrees.SearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space, m_iNumberOfOtherDynamicPivots + p_space.m_iNumberOfCheckedLeaves); \
+            } \
+        } \
+        p_query.SortResult(); \
+
+
 #define Search(CheckDeleted, CheckDuplicated) \
         std::shared_lock<std::shared_timed_mutex> lock(*(m_pTrees.m_lock)); \
         m_pTrees.InitSearchTrees(m_pSamples, m_fComputeDistance, p_query, p_space); \
@@ -238,6 +295,37 @@ namespace SPTAG
         } \
         p_query.SortResult(); \
 
+        template <typename T>
+        void Index<T>::PartialSearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated, const std::vector<int>& accum) const
+        {
+            if (m_pQuantizer && !p_query.HasQuantizedTarget())
+            {
+                p_query.SetTarget(p_query.GetTarget(), m_pQuantizer);
+            }
+
+            if (m_deletedID.Count() == 0 || p_searchDeleted)
+            {
+                if (p_searchDuplicated)
+                {
+                    PartialSearch(;, if (!p_query.AddPoint(tmpNode, gnode.distance)))
+                }
+                else
+                {
+                    PartialSearch(;, p_query.AddPoint(tmpNode, gnode.distance);)
+                }
+            }
+            else
+            {
+                if (p_searchDuplicated)
+                {
+                    PartialSearch(if (!m_deletedID.Contains(tmpNode)), if (!p_query.AddPoint(tmpNode, gnode.distance)))
+                }
+                else
+                {
+                    PartialSearch(if (!m_deletedID.Contains(tmpNode)), p_query.AddPoint(tmpNode, gnode.distance);)
+                }
+            }
+        }
 
         template <typename T>
         void Index<T>::SearchIndex(COMMON::QueryResultSet<T> &p_query, COMMON::WorkSpace &p_space, bool p_searchDeleted, bool p_searchDuplicated) const
@@ -270,6 +358,31 @@ namespace SPTAG
                 }
             }
         }
+
+        
+        template<typename T>
+        ErrorCode Index<T>::PartialSearchIndex(QueryResult &p_query, bool p_searchDeleted, const std::vector<int>& accum) const
+        {
+            if (!m_bReady) return ErrorCode::EmptyIndex;
+
+            auto workSpace = m_workSpacePool->Rent();
+            workSpace->Reset(m_iMaxCheck, p_query.GetResultNum());
+
+            PartialSearchIndex(*((COMMON::QueryResultSet<T>*)&p_query), *workSpace, p_searchDeleted, true, accum);
+
+            m_workSpacePool->Return(workSpace);
+
+            if (p_query.WithMeta() && nullptr != m_pMetadata)
+            {
+                for (int i = 0; i < p_query.GetResultNum(); ++i)
+                {
+                    SizeType result = p_query.GetResult(i)->VID;
+                    p_query.SetMetadata(i, (result < 0) ? ByteArray::c_empty : m_pMetadata->GetMetadataCopy(result));
+                }
+            }
+            return ErrorCode::Success;
+        }
+
 
         template<typename T>
         ErrorCode Index<T>::SearchIndex(QueryResult &p_query, bool p_searchDeleted) const
@@ -326,6 +439,43 @@ namespace SPTAG
             return ErrorCode::Success;
         }
 #pragma endregion
+
+        template <typename T>
+        ErrorCode Index<T>::BuildMultiIndex(const void* p_data, SizeType p_vectorNum, const std::vector<int>& accum, DimensionType p_dimension, bool p_normalized, bool p_shareOwnership)
+        {
+            if (p_data == nullptr || p_vectorNum == 0 || p_dimension == 0) return ErrorCode::EmptyData;
+
+            omp_set_num_threads(m_iNumberOfThreads);
+
+            m_pSamples.Initialize(p_vectorNum, p_dimension, m_iDataBlockSize, m_iDataCapacity, (T*)p_data, p_shareOwnership);
+            m_deletedID.Initialize(p_vectorNum, m_iDataBlockSize, m_iDataCapacity);
+
+            if (DistCalcMethod::Cosine == m_iDistCalcMethod && !p_normalized)
+            {
+                int base = COMMON::Utils::GetBase<T>();
+#pragma omp parallel for
+                for (SizeType i = 0; i < GetNumSamples(); i++) {
+                    COMMON::Utils::Normalize(m_pSamples[i], GetFeatureDim(), base);
+                }
+            }
+
+            m_workSpacePool.reset(new COMMON::WorkSpacePool<COMMON::WorkSpace>());
+            m_workSpacePool->Init(m_iNumberOfThreads, max(m_iMaxCheck, m_pGraph.m_iMaxCheckForRefineGraph), m_iHashTableExp);
+            m_threadPool.init();
+
+            auto t1 = std::chrono::high_resolution_clock::now();
+            m_pTrees.BuildMultiTrees<T>(m_pSamples, m_iDistCalcMethod, m_iNumberOfThreads, accum);
+            auto t2 = std::chrono::high_resolution_clock::now();
+            LOG(Helper::LogLevel::LL_Info, "Build Tree time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t2 - t1).count());
+            
+            m_pGraph.BuildGraph<T>(this, &(m_pTrees.GetSampleMap()));
+
+            auto t3 = std::chrono::high_resolution_clock::now();
+            LOG(Helper::LogLevel::LL_Info, "Build Graph time (s): %lld\n", std::chrono::duration_cast<std::chrono::seconds>(t3 - t2).count());
+
+            m_bReady = true;
+            return ErrorCode::Success;
+        }
 
         template <typename T>
         ErrorCode Index<T>::BuildIndex(const void* p_data, SizeType p_vectorNum, DimensionType p_dimension, bool p_normalized, bool p_shareOwnership)
