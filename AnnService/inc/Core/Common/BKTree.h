@@ -195,7 +195,8 @@ namespace SPTAG
                         for (DimensionType j = 0; j < args._RD; j++) TCenter[j] = (T)(currCenters[j]);
                     }
                 }
-                diff += args.fComputeDistance(args.centers + k*args._D, TCenter, args._D);
+                // diff += args.fComputeDistance(args.centers + k*args._D, TCenter, args._D);
+                diff += DistanceUtils::ComputeDistance(args.centers + k*args._D, TCenter, args._D, DistCalcMethod::L2);
             }
             return diff;
         }
@@ -373,13 +374,12 @@ namespace SPTAG
                 }
 
                 /*
-                if (debug) {
-                    std::string log = "";
-                    for (int k = 0; k < args._DK; k++) {
-                        log += std::to_string(args.counts[k]) + " ";
-                    }
-                    LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f lambda:(%f,%f) counts:%s\n", iter, currDist, originalLambda, adjustedLambda, log.c_str());
+                std::string log = "";
+                for (int k = 0; k < args._DK; k++) {
+                    log += std::to_string(args.counts[k]) + " ";
                 }
+                LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f lambda:(%f,%f) counts:%s\n", iter, currDist, originalLambda, adjustedLambda, log.c_str());
+                LOG(Helper::LogLevel::LL_Info, "iter %d dist:%f diff:%f noimprove:%d\n", iter, currDist, currDiff, noImprovement);
                 */
 
                 currDiff = RefineCenters<T, R>(data, args);
@@ -494,9 +494,20 @@ break;
             if (abort && abort->ShouldAbort()) return 1;
 
             int numClusters = 0;
-            for (int i = 0; i < args._K; i++) if (args.counts[i] > 0) numClusters++;
+            int npos = 0;
+            int ipos = 0;
+            for (int i = 0; i < args._K; i++) {
+                if (args.counts[i] > 0) {
+                    ipos = i;
+                    npos = args.counts[i];
+                    numClusters++;
+                }
+            }
 
-            if (numClusters <= 1) return numClusters;
+            if (numClusters <= 1) {
+                LOG(Helper::LogLevel::LL_Info, "!!!! num cluster: %d; counts: %d; counts idx: %d\n", numClusters, npos, ipos);
+                return numClusters;
+            }
 
             args.Shuffle(indices, first, last);
             return numClusters;
@@ -586,10 +597,10 @@ break;
                             }
                         }
                         else { // clustering the data into BKTKmeansK clusters
-                            if (dynamicK) {
-                                args._DK = std::min<int>((item.last - item.first) / m_iBKTLeafSize + 1, m_iBKTKmeansK);
-                                args._DK = std::max<int>(args._DK, 2);
-                            }
+                            // if (dynamicK) {
+                            //     args._DK = std::min<int>((item.last - item.first) / m_iBKTLeafSize + 1, m_iBKTKmeansK);
+                            //     args._DK = std::max<int>(args._DK, 2);
+                            // }
 
                             int numClusters = KmeansClustering(data, localindices, item.first, item.last, args, m_iSamples, m_fBalanceFactor, item.debug, abort);
                             if (numClusters <= 1) {

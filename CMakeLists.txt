@@ -90,7 +90,7 @@ else()
     message (FATAL_ERROR "Could not find Boost >= 1.67!")
 endif()
 
-option(GPU "GPU" ON)
+option(GPU "GPU" OFF)
 option(LIBRARYONLY "LIBRARYONLY" OFF)
 
 add_subdirectory (ThirdParty/zstd/build/cmake)
